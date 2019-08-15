@@ -24,5 +24,5 @@ public function main() {
     websub:WebSubHub webSubHub = result is websub:HubStartedUpError ?
                                                result.startedUpHub : result;
     var result1 = webSubHub.registerTopic(ORDER_TOPIC);
-    while(true){}
+    while(true) {}
 }

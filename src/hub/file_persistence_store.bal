@@ -2,6 +2,7 @@ import ballerina/log;
 import ballerina/websub;
 import ballerina/filepath;
 import ballerina/system;
+import ballerina/lang.'int as ints;
 
 public const string SUBSCRIPTION_LOG_FILE = "websub_subscription.csv";
 public const string TOPIC_LOG_FILE = "websub_topic.csv";
@@ -9,11 +10,8 @@ public const string TOPIC_LOG_FILE = "websub_topic.csv";
 type FilePersistenceStore object {
     
     *websub:HubPersistenceStore;
-    io:WritableTextRecordChannel subsWritableChannel;
-    io:WritableTextRecordChannel topicWritableChannel;
-
-    io:ReadableTextRecordChannel subsReadableChannel;
-    io:ReadableTextRecordChannel topicReadableChannel;
+    string subsLogFilepath = "";
+    string topicLogFilepath = "";
 
     public function __init(string directoryPath) {
         if (!system:exists(directoryPath)) {
@@ -32,38 +30,39 @@ type FilePersistenceStore object {
 
         string subsLogFilepath = checkpanic filepath:build(directoryPath, SUBSCRIPTION_LOG_FILE);
         string topicLogFilepath = checkpanic filepath:build(directoryPath, TOPIC_LOG_FILE);
-        self.subsWritableChannel = checkpanic self.getWritableRecordChannel(subsLogFilepath, "UTF-8", ",", "\\n");
-        self.topicWritableChannel = checkpanic self.getWritableRecordChannel(topicLogFilepath, "UTF-8", ",", "\\n");
-
-        self.subsReadableChannel = checkpanic self.getReadableRecordChannel(subsLogFilepath, "UTF-8", ",", "\\n");
-        self.topicReadableChannel = checkpanic self.getReadableRecordChannel(topicLogFilepath, "UTF-8", ",", "\\n");
     }
 
     public function addSubscription(websub:SubscriptionDetails subscriptionDetails) {
         io:println("Add subscription");
         io:println(subscriptionDetails);
+        io:WritableTextRecordChannel subsWritableChannel = checkpanic self.getWritableRecordChannel(
+                                                                            self.subsLogFilepath, "UTF-8", ",", "\n");
         string[] fieldArray = [];
         foreach var [k, v] in subscriptionDetails.entries() {
             fieldArray.push(k + ":" + v.toString());
         }
-        var result = self.subsWritableChannel.write(fieldArray);
+        var result = subsWritableChannel.write(fieldArray);
         if (result is error) {
             log:printError("Error while writing subscription log file", result);
         }
+        checkpanic subsWritableChannel.close();
     }
 
     public function removeSubscription(websub:SubscriptionDetails subscriptionDetails) {
-        io:println("Remove subscription");
-        io:println(subscriptionDetails);
+        log:printInfo("Remove subscription");
+        log:printInfo(subscriptionDetails.toString());
     }
 
     public function addTopic(string topic) {
-        io:println("Add topic: " + topic);
+        io:WritableTextRecordChannel topicWritableChannel = checkpanic self.getWritableRecordChannel(
+                                                                            self.topicLogFilepath, "UTF-8", ",", "\n");
+        log:printInfo("Add topic: " + topic);
         string[] fieldArray = [topic];
-        var result = self.topicWritableChannel.write(fieldArray);
+        var result = topicWritableChannel.write(fieldArray);
         if (result is error) {
             log:printError("Error while writing subscription log file", result);
         }
+        checkpanic topicWritableChannel.close();
     }
 
     public function removeTopic(string topic) {
@@ -71,22 +70,30 @@ type FilePersistenceStore object {
     }
 
     public function retrieveTopics() returns (string[]) {
+       log:printInfo("Retrieving all topics");
+       io:ReadableTextRecordChannel topicReadableChannel = checkpanic self.getReadableRecordChannel(
+                                                                            self.topicLogFilepath, "UTF-8", "\n", ",");
         string[] topics = [];
-        while(self.topicReadableChannel.hasNext()) {
-            var records = self.topicReadableChannel.getNext();
+        while(topicReadableChannel.hasNext()) {
+            var records = topicReadableChannel.getNext();
             if (records is error) {
                 log:printError("Error while reading topic log file", records);
             } else {
                 topics.push(records.pop());
             }
         }
+        checkpanic topicReadableChannel.close();
         return topics;
     }
 
     public function retrieveAllSubscribers() returns (websub:SubscriptionDetails[]) {
+        log:printInfo("Retrieving all subscribers");
+        io:ReadableTextRecordChannel subsReadableChannel = checkpanic self.getReadableRecordChannel(
+                                                                            self.subsLogFilepath, "UTF-8", "\n", ",");
         websub:SubscriptionDetails[] subscriptions = [];
-        while(self.subsReadableChannel.hasNext()) {
-            var records = self.subsReadableChannel.getNext();
+        while(subsReadableChannel.hasNext()) {
+            var records = subsReadableChannel.getNext();
+            io:println(records);
             websub:SubscriptionDetails details = {};
             if (records is error) {
                 log:printError("Error while reading subscription log file", records);
@@ -94,19 +101,31 @@ type FilePersistenceStore object {
                 foreach string field in records {
                     int? index = field.indexOf(":");
                     if(index is int) {
-                        string key = field.substring(0, index-1);
-                        string value = field.substring(index+1, field.length());
-
-                        // if (key == "leaseSeconds" || key == "createdAt") {
-                        //     details[key] = value;
-                        // }
-                        details[key] = value;
+                        string key = field.substring(0, index);
+                        string value;
+                        if (field.endsWith("\n")) {
+                            value = field.substring(index+1, field.length()-1);
+                        } else {
+                            value = field.substring(index+1, field.length());
+                        }
+                        log:printInfo("field " + key + ":" + value);
+                        if (key == "leaseSeconds" || key == "createdAt") {
+                            int|error intValue = ints:fromString(value);
+                            if (intValue is error) {
+                                log:printError("Error while converting the string value", intValue);
+                            } else {
+                                details[key] = intValue;
+                            }
+                        } else {
+                            details[key] = value;
+                        }
                     }
                 }
+                log:printInfo("Retrieved subscriber: " + details.toString());
                 subscriptions.push(details);
             }
         }
-        
+        checkpanic subsReadableChannel.close();
         return subscriptions;
     }
 
@@ -129,18 +148,5 @@ type FilePersistenceStore object {
                                                                 fs = fs);
         return <@untained> delimitedRecordChannel;
     }
-
-    // function getReadableCharacterChannel(string filePath, string encoding)
-    //                                         returns (io:ReadableCharacterChannel|error) {
-    //     io:ReadableByteChannel byteChannel = check io:openReadableFile(filePath);
-    //     io:ReadableCharacterChannel characterChannel = new(byteChannel, encoding);
-    //     return <@untained> characterChannel;
-    // }
-
-    // function getWritableCharacterChannel(string filePath, string encoding) returns (io:WritableCharacterChannel|error) {
-    //     io:WritableByteChannel byteChannel = check io:openWritableFile(filePath, true);
-    //     io:WritableCharacterChannel characterChannel = new(byteChannel, encoding);
-    //     return <@untained> characterChannel;
-    // }
 
 };

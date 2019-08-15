@@ -1,1 +1,1 @@
-topic:http://localhost:9090/ordermgt/ordertopic\r?\ncallback:http://localhost:8181/ordereventsubscriber\r?\nsecret:Kslk30SNF2AChs2\r?\nleaseSeconds:3600000\r?\ncreatedAt:1565874468291,
+topic:http://localhost:9090/ordermgt/ordertopic,callback:http://localhost:8181/ordereventsubscriber,secret:Kslk30SNF2AChs2,leaseSeconds:3600000,createdAt:1565897210916
